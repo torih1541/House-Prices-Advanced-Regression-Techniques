@@ -12,3 +12,4 @@ https://github.com/torih1541/House-Prices-Advanced-Regression-Techniques/blob/ma
 https://torih1541.shinyapps.io/Project2App/
 
 ### Report on Analysis
+https://github.com/torih1541/House-Prices-Advanced-Regression-Techniques/blob/main/Stats%201%20Project%202%20Report.pdf
