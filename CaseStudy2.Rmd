@@ -1,0 +1,119 @@
+---
+title: "CaseStudy2DDS"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Load necessary libraries
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(magrittr)
+```
+
+# Load and inspect data
+```{r}
+data <- read_csv("CaseStudy2-data.csv")
+
+#Inspect data
+head(data)
+summary(data)
+str(data)
+
+```
+# Change Categorical Variables
+```{r}
+data <- data %>%
+  mutate(
+    Attrition = factor(Attrition, levels = c("No", "Yes")),
+    BusinessTravel = factor(BusinessTravel),
+    Department = factor(Department),
+    EducationField = factor(EducationField),
+    Gender = factor(Gender),
+    JobRole = factor(JobRole),
+    MaritalStatus = factor(MaritalStatus),
+    OverTime = factor(OverTime)
+  )
+
+# Check structure
+str(data)
+```
+# EDA
+
+```{r}
+# Distribution of Attrition
+ggplot(data, aes(x = Attrition)) + 
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Attrition")
+
+# Attrition by Gender
+ggplot(data, aes(x = Gender, fill = Attrition)) + 
+  geom_bar(position = "fill") +
+  labs(title = "Attrition by Gender")
+
+# Attrition by Age
+ggplot(data, aes(x = Age, fill = Attrition)) + 
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.6) +
+  labs(title = "Age Distribution by Attrition")
+```
+# Correlation
+
+```{r}
+# Convert Attrition to numeric for correlation analysis
+data$Attrition <- as.numeric(data$Attrition)
+
+# Calculate correlations
+correlations <- cor(data[sapply(data, is.numeric)])
+
+# Visualize correlation matrix
+corrplot(correlations, method = "color")
+```
+# Model
+
+```{r}
+
+set.seed(123)
+trainingIndex <- createDataPartition(data$Attrition, p = 0.8, list = FALSE)
+trainData <- data[trainingIndex, ]
+testData <- data[-trainingIndex, ]
+
+# Ensure stratification was successful
+table(trainData$Attrition)
+table(testData$Attrition)
+
+# Check the levels in training data for all factor variables
+sapply(trainData, function(x) if(is.factor(x)) levels(x) else NA)
+
+# Check for any variables with only one level in training data
+single_level_vars <- sapply(trainData, function(x) if(is.factor(x) && length(levels(x)) < 2) TRUE else FALSE)
+
+# Print variables with only one level
+names(single_level_vars[single_level_vars == TRUE])
+
+# Remove variables with only one level before modeling
+trainData <- trainData[, !single_level_vars]
+testData <- testData[, !single_level_vars]
+
+# Converting categorical columns to factors with explicit levels
+factor_vars <- c("BusinessTravel", "Department", "EducationField", "Gender", "JobRole", "MaritalStatus", "OverTime")
+trainData[factor_vars] <- lapply(trainData[factor_vars], function(x) factor(x))
+testData[factor_vars] <- lapply(testData[factor_vars], function(x) factor(x))
+
+# Verify levels in training data
+sapply(trainData[factor_vars], levels)
+
+# Try building the model again
+model <- glm(Attrition ~ ., data = trainData, family = "binomial")
+
+# Check the model summary
+summary(model)
+```
+
+
