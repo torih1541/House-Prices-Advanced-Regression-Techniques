@@ -1,0 +1,410 @@
+---
+title: "Analysis Question 2"
+author: "Kosi Okeke"
+date: "2024-04-16"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Loading Packages**
+
+```{r packages}
+library(MASS) 
+library(glmnet) 
+library(ggplot2) 
+library(leaps) 
+library(olsrr) 
+library(plyr) 
+library(forecast) 
+library(caret) 
+library(car) 
+library(lmtest)
+```
+
+**Loading Data**
+
+```{r Data}
+train_df = read.csv(choose.files(), header = TRUE)
+test_df = read.csv(choose.files(), header = TRUE)
+
+View(train_df)
+View(test_df)
+names(train_df)
+str(train_df)
+```
+
+**Data Processing and Cleaning**
+
+First we will do a count of NA values per column.
+
+```{r Count of NAs}
+## Count the number of NA values in each column
+na_summary <- colSums(is.na(train_df))
+sum(na_summary > 0) # 19 columns w NA. I would like to filter them out to ease
+#choosing variables
+# Filter out columns with NA values
+na_summary <- na_summary[na_summary > 0]
+# Print the summary, should be the names of the 19 and how many.
+print(na_summary)
+```
+
+Here we will obtain the column names then check a summary of our clean datasets.
+
+```{r Cleaning}
+# Get the column names with NA values
+na_cols <- names(na_summary)
+# Create a new dataframe without the columns containing NA values
+train_clean <- train_df[, !(names(train_df) %in% na_cols)]
+test_clean <- test_df[, !(names(test_df) %in% na_cols)]
+#Checking summary
+summary(train_clean)
+summary(test_clean)
+```
+
+From our summary we see that our character columns would make more sense if they were changed to factor values. After converting to characters, we will double check for NA's below.
+
+```{r Factors/Double Check}
+# we see that there are many character columns that can be changed into a factor
+# of multiple levels
+# Identify character columns
+character_columns <- sapply(train_clean, is.character)
+character_columns <- sapply(test_clean, is.character)
+# Get the names of columns identified as character columns
+character_column_names <- names(character_columns)[character_columns]
+# Convert character columns to factors
+train_clean[character_column_names] <- lapply(train_clean[character_column_names], as.factor)
+test_clean[character_column_names] <- lapply(test_clean[character_column_names], as.factor)
+
+# Double checking for NA's:
+missing_values <- colSums(is.na(train_clean))
+missing_val2 <- colSums(is.na(test_clean))
+# Display variables with missing values and their counts
+missing_values <- missing_values[missing_values > 0]
+missing_val2 <- missing_val2[missing_val2 > 0]
+print(missing_values) #There should be ZERO NA's.
+print(missing_val2) #There are NA's!! We can impute to deal w them.
+```
+
+Now we see that there are no longer NAs in our Train_clean dataset, we want to eliminate NAs from the Test_clean dataset as well by imputing. For categorical variable columns we impute NAs along the mode, for numeric variable columns we impute along the mean.
+
+```{r Imputing}
+#TO DEAL WITH MISSING VALUES WE WILL IMPUTE ALONG MEAN (NUMERIC)/MODE (CATEGORICAL)
+# Define a function to calculate the mode
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Identify columns with missing values
+missing_cols <- colnames(test_clean)[colSums(is.na(test_clean)) > 0]
+
+# Impute categorical variables with mode and numerical variables with mean
+for (col in missing_cols) {
+  if (is.factor(test_clean[[col]])) {
+    # Impute categorical variables with mode
+    test_clean[[col]][is.na(test_clean[[col]])] <- Mode(test_clean[[col]][!is.na(test_clean[[col]])])
+  } else {
+    # Impute numerical variables with mean
+    test_clean[[col]][is.na(test_clean[[col]])] <- mean(test_clean[[col]], na.rm = TRUE)
+  }
+}
+
+# Verify if all missing values have been imputed
+colSums(is.na(test_clean)) #NO MORE MISSING VALUES
+
+```
+
+NO MORE MISSING VALUES!
+
+**Variable Analysis**
+
+We will now analyze our response variable and check its distribution.
+
+```{r Analyzing}
+#Distribution of SalePrice is right-skewed:
+ggplot(data = train_clean, aes(x = SalePrice)) +
+  geom_histogram() +
+  labs(title = "SalePrice Dist - Right Skewed")
+
+#Logging the SalePrice column because it is very right-skewed (non normal distribution)
+train_clean$Log_SalePrice = log(train_clean$SalePrice)
+
+#Distribution of Log_SalePrice:
+ggplot(data = train_clean, aes(x = Log_SalePrice)) +
+  geom_histogram() +
+  labs(title = "Log_SalePrice Dist - More Normal")
+```
+
+**Model Selection**
+
+Here we will do different selection techniques and store our models under different variable names (log_forward, log_backward, log_stepwise).
+
+[Forward Selection]{.underline}
+
+```{r Forward}
+#another way to do forward selection:
+#int only model
+log_intercept_only = lm(Log_SalePrice ~ 1, data = train_clean)
+#model w all predictors
+log_all = lm(Log_SalePrice ~.-SalePrice, data = train_clean)
+#forward selection
+log_forward = step(log_intercept_only, direction = "forward", scope = formula(log_all), trace = 0)
+log_forward # to show results 
+summary(log_forward)
+```
+
+[Backward Elimination]{.underline}
+
+```{r Backward}
+#Do a backwards elimination
+log_backward = step(log_all, direction = 'backward', scope = formula(log_all), trace = 0)
+log_backward
+summary(log_backward)
+```
+
+[Stepwise Selection]{.underline}
+
+```{r Stepwise}
+# Perform stepwise selection using BIC
+log_stepwise <- stepAIC(log_all, direction = "both", k = log(nrow(train_clean)), trace = 0)
+log_stepwise
+summary(log_stepwise)
+```
+
+**Checking Assumptions!**
+
+```{r Assumption 1}
+##CHECKING ASSUMPTIONS OF EACH MODEL:
+#We can see that a good amount of the variables we've chosen are linearly related
+# to log_SalePrice
+#Distribution of Overall Qual vs. Log_SalePrice the means increase linearly:
+ggplot(data = train_clean, aes(x = OverallQual, y = Log_SalePrice)) +
+  geom_point()
+#Distribution of X1stFlrSF vs. Log_SalePrice shows the linear correlation:
+ggplot(data = train_clean, aes(x = X1stFlrSF, y = Log_SalePrice)) +
+  geom_point()
+#Distribution of TotalBsmtSF vs. Log_SalePrice:
+ggplot(data = train_clean, aes(x = TotalBsmtSF, y = Log_SalePrice)) +
+  geom_point()
+
+```
+
+Here we see how the variables are related linearly.
+
+```{r Assumption 2}
+##CHECKING VIF FOR MULTICOLLINEARITY:
+# Calculate VIF using our first model (forward)
+vif_values <- vif(log_forward)
+# Print VIF values
+print(vif_values)
+```
+
+There are a few variables with high multicollinearity (Neighborhood, MSZoning and Sale Condition) we will leave these for our forward model. While brainstorming for our custom model these will be the specific variables we will leave out.
+
+```{r Assumption 3}
+# Plot Cook's distance
+ols_plot_cooksd_bar(log_forward) #We can see that there are only two observations
+# with a Cook's D greater than 0.2. The rest fall below it. Since there are 1400+
+# observations we can leave them in. 
+ols_plot_cooksd_chart(log_forward)
+```
+
+We can see that there are only two observations with a Cook's D greater than 0.2. The rest fall below it. Since there are 1400+ observations we can leave them in.
+
+```{r Assumption 4}
+#CHECKING FOR HETEROSCEDASTICITY:
+bptest(log_forward)
+bptest(log_backward)
+bptest(log_stepwise)
+#Each p-value < 2.2e-16
+```
+
+When running the Studentized Breusch-Pagan test, our respective p-value for each of the models is \< 2.2e-16. This extremely small p-value provides evidence against Heteroscedasticity, meaning, the variance across variables is constant.
+
+```{r Assumption 5}
+plot(log_forward)
+```
+
+Our residual plot and our QQ plots both look to fulfill our assumptions.
+
+NOW... Let's build our predictions. We will deal with simply the log_forward, log_backward, and log_stepwise first.
+
+```{r Building Predictions}
+#MAKING PREDICTIONS ON THE TEST DATASET
+# Predict Log_SalePrice using the forward-selected model
+forward_predictions <- predict(log_forward, newdata = test_clean)
+
+# Predict Log_SalePrice using the backward-selected model
+backward_predictions <- predict(log_backward, newdata = test_clean)
+
+# Predict Log_SalePrice using the stepwise-selected model
+stepwise_predictions <- predict(log_stepwise, newdata = test_clean)
+
+# Create a dataframe with predictions from each model
+predictions_df <- data.frame(
+  Forward_Predictions = forward_predictions,
+  Backward_Predictions = backward_predictions,
+  Stepwise_Predictions = stepwise_predictions
+)
+# Take the exponential of each variable to back-transform
+predictions_df <- exp(predictions_df)
+# Rename the columns by adding a string to indicate they represent SalePrice
+colnames(predictions_df) <- paste0(colnames(predictions_df), "_SalePrice")
+View(predictions_df)
+```
+
+We can see when viewing the dataframe we have all our predicted values for the Test_clean dataframe.
+
+**Analysing our Performance (Cross Validation**)
+
+[Forward]{.underline}
+
+```{r Forwards-CV}
+##DEFINING FORWARD MODEL
+formula_forward <- Log_SalePrice ~ OverallQual + Neighborhood + GrLivArea + GarageCars + OverallCond + BsmtFullBath + RoofMatl + TotalBsmtSF + YearBuilt + BldgType + Condition2 + MSZoning + BsmtFinSF1 + SaleCondition + Functional + LotArea + CentralAir + KitchenQual + Condition1 + Fireplaces + Heating + ScreenPorch + SaleType + Exterior1st + WoodDeckSF + YearRemodAdd + GarageArea + Foundation + LandSlope + EnclosedPorch + HeatingQC + LotConfig + BsmtFinSF2 + Street + X3SsnPorch + KitchenAbvGr + PoolArea + HalfBath + FullBath + X1stFlrSF + LandContour
+# Train your model with 10-fold cross-validation
+model_forward <- train(
+  formula_forward,
+  data = train_clean,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+# Get cross-validated prediction errors
+cv_press_forward <- model_forward$results$RMSE
+# [1] 0.1804603
+
+```
+
+[Backward]{.underline}
+
+```{r Backwards-CV}
+##DO THE SAME FOR BACKWARD:
+# Define your model formula
+formula_backward <- Log_SalePrice ~ MSZoning + LotArea + Street + LandContour + 
+          Utilities + LotConfig + LandSlope + Neighborhood + Condition1 + 
+          Condition2 + BldgType + OverallQual + OverallCond + YearBuilt + 
+          YearRemodAdd + RoofStyle + RoofMatl + Exterior1st + Foundation + 
+          BsmtFinSF1 + BsmtFinSF2 + BsmtUnfSF + Heating + HeatingQC + 
+          CentralAir + X1stFlrSF + X2ndFlrSF + LowQualFinSF + BsmtFullBath + 
+          FullBath + HalfBath + KitchenAbvGr + KitchenQual + TotRmsAbvGrd + 
+          Functional + Fireplaces + GarageCars + GarageArea + WoodDeckSF + 
+          OpenPorchSF + EnclosedPorch + X3SsnPorch + ScreenPorch + 
+          PoolArea + SaleType + SaleCondition
+# Train your model with 10-fold cross-validation
+model_backward <- train(
+  formula_backward,
+  data = train_clean,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+# Get cross-validated prediction errors
+cv_press_backward <- model_backward$results$RMSE
+# [1] 0.1798864
+
+```
+
+[Stepwise]{.underline}
+
+```{r Stepwise-CV}
+##DO THE SAME FOR STEPWISE:
+# Define your model formula
+formula_stepwise <- Log_SalePrice ~ MSZoning + LotArea + LandSlope + 
+          Condition2 + OverallQual + OverallCond + YearBuilt + YearRemodAdd + 
+          RoofMatl + Foundation + BsmtFinSF1 + BsmtFinSF2 + BsmtUnfSF + 
+          CentralAir + X1stFlrSF + X2ndFlrSF + LowQualFinSF + KitchenAbvGr + 
+          KitchenQual + Functional + Fireplaces + GarageCars + GarageArea + 
+          ScreenPorch + SaleCondition
+# Train your model with 10-fold cross-validation
+model_stepwise <- train(
+  formula_stepwise,
+  data = train_clean,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+# Get cross-validated prediction errors
+cv_press_stepwise <- model_stepwise$results$RMSE
+# [1] 0.2003931
+
+```
+
+After all of our analysis for CV PRESS we see that our best performing model is the first one (Forward_Selection).
+
+**Creating/Submitting Dataframes**
+
+Here we will have to create dataframes with the ID's from test_clean with the new predicted values added in.
+
+```{r Making_Dataframes}
+#BUILDING THE SUBMISSION DATAFRAMES:
+submission_for = data.frame(
+  ID = test_df$Id,
+  SalePrice = predictions_df$Forward_Predictions_SalePrice)
+
+submission_back = data.frame(
+  ID = test_df$Id,
+  SalePrice = predictions_df$Backward_Predictions_SalePrice)
+
+submission_step = data.frame(
+  ID = test_df$Id,
+  SalePrice = predictions_df$Stepwise_Predictions_SalePrice)
+```
+
+Next and final step is to create the CSV for each submission so we can obtain a Kaggle score.
+
+```{r Create_CSV}
+#SAVING THE DATAFRAMES TO CSV FOR UPLOADING TO KAGGLE
+# Exporting submission_for dataframe
+write.csv(submission_for, file = "submission_for.csv", row.names = FALSE)
+
+# Exporting submission_back dataframe
+write.csv(submission_back, file = "submission_back.csv", row.names = FALSE)
+
+# Exporting submission_step dataframe
+write.csv(submission_step, file = "submission_step.csv", row.names = FALSE)
+```
+
+**Creating and checking the Custom Model**
+
+```{r Custom Model}
+###CREATING A CUSTOM LINEAR MODEL:
+# Define your custom model formula (Removing High VIF variables from our forward model)
+formula_custom <- Log_SalePrice ~ OverallQual + GrLivArea + GarageCars + OverallCond + BsmtFullBath + RoofMatl + TotalBsmtSF + YearBuilt + BldgType + Condition2 + BsmtFinSF1 + Functional + LotArea + CentralAir + KitchenQual + Condition1 + Fireplaces + Heating + ScreenPorch + SaleType + Exterior1st + WoodDeckSF + YearRemodAdd + GarageArea + Foundation + LandSlope + EnclosedPorch + HeatingQC + LotConfig + BsmtFinSF2 + Street + X3SsnPorch + KitchenAbvGr + PoolArea + HalfBath + FullBath + X1stFlrSF + LandContour
+# Train your model with 10-fold cross-validation
+model_custom <- train(
+  formula_custom,
+  data = train_clean,
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+# Get cross-validated prediction errors
+cv_press_custom <- model_custom$results$RMSE
+
+
+# Predict Log_SalePrice using the stepwise-selected model
+custom_predictions <- predict(model_custom, newdata = test_clean)
+
+# Create a dataframe with predictions from each model
+predictions_df <- data.frame(
+  Forward_Predictions = forward_predictions,
+  Backward_Predictions = backward_predictions,
+  Stepwise_Predictions = stepwise_predictions,
+  Custom_Predictions = custom_predictions
+)
+
+# Take the exponential of each variable to back-transform again
+predictions_df <- exp(predictions_df)
+# Rename the columns by adding a string to indicate they represent SalePrice
+colnames(predictions_df) <- paste0(colnames(predictions_df), "_SalePrice")
+
+#BUILDING THE CUSTOM SUBMISSION DATAFRAMES:
+submission_custom = data.frame(
+  ID = test_df$Id,
+  SalePrice = predictions_df$Custom_Predictions_SalePrice)
+# Exporting submission_custom dataframe
+write.csv(submission_custom, file = "submission_custom.csv", row.names = FALSE)
+```
+
+Lastly, this model did not perform better than our Forward model. So our Custom
+Model that was uploaded to Kaggle will be the same as our Forward model for performance stats.
