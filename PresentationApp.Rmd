@@ -1,0 +1,86 @@
+---
+title: "App Code"
+output: ioslides_presentation
+date: "`r Sys.Date()`"
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Shiny App
+
+## Interactive Plot
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(rsconnect)
+library(readr)
+library(magrittr)
+library(dplyr)
+
+data <- read_csv("train.csv")
+
+# UI
+ui <- fluidPage(
+  titlePanel("Interactive Price vs. Living Area Chart"),
+  sidebarLayout(
+    sidebarPanel(
+      helpText("Interactive chart displaying the relationship between sale price and living area."),
+      # Checkbox group for neighborhoods
+      checkboxGroupInput(
+        "neighborhood",
+        "Neighborhood:",
+        choices = unique(data$Neighborhood),
+        selected = unique(data$Neighborhood)
+      ),
+      # Options for log transformation
+      checkboxInput("logScale", "Log-transform Sale Price", value = FALSE),
+      checkboxInput("logGrLivArea", "Log-transform Living Area", value = FALSE)
+    ),
+    mainPanel(
+      plotOutput("priceLivingAreaPlot")
+    )
+  )
+)
+
+# Server
+server <- function(input, output) {
+  filtered_data <- reactive({
+    if (is.null(input$neighborhood) || identical(input$neighborhood, "")) {
+      dat <- data
+    } else {
+      dat <- data %>% filter(Neighborhood %in% input$neighborhood)
+    }
+    dat
+  })
+  
+  # Render the plot
+  output$priceLivingAreaPlot <- renderPlot({
+    plot_data <- filtered_data()
+    
+    # Apply log transformations if selected
+    if (input$logScale) {
+      plot_data$SalePrice <- log(plot_data$SalePrice)
+    }
+    if (input$logGrLivArea) {
+      plot_data$GrLivArea <- log(plot_data$GrLivArea)
+    }
+    
+    # Generate the plot
+    ggplot(plot_data, aes(x = GrLivArea, y = SalePrice)) +
+      geom_point(alpha = 0.5) +
+      labs(
+        x = ifelse(input$logGrLivArea, "Log of Living Area (sq ft)", "Living Area (sq ft)"),
+        y = ifelse(input$logScale, "Log of Sale Price ($)", "Sale Price ($)"),
+        title = "Sale Price vs. Living Area"
+      ) +
+      theme_minimal()
+  })
+}
+
+# Run the app
+shinyApp(ui = ui, server = server)
+```
